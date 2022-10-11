@@ -1,0 +1,131 @@
+stages:
+- stage: 'Build'
+  displayName: 'Build the web application'
+  jobs:
+  - job: 'Build'
+    displayName: 'Build job'
+    pool:
+      vmImage: 'windows-latest'
+      demands:
+      - npm
+
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Use .NET SDK $(dotnetSdkVersion)'
+      inputs:
+        version: '$(dotnetSdkVersion)'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore project dependencies'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build the project - $(buildConfiguration)'
+      inputs:
+        command: 'build'
+        arguments: '--no-restore --configuration $(buildConfiguration)'
+        projects: '**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish the project - $(buildConfiguration)'
+      inputs:
+        command: 'publish'
+        projects: '**/*.csproj'
+        publishWebProjects: false
+        arguments: '--no-build --configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/$(buildConfiguration)'
+        zipAfterPublish: true
+
+    - publish: '$(Build.ArtifactStagingDirectory)'
+      artifact: drop
+- stage: 'Deploy'
+  displayName: 'Deploy the web application'
+  dependsOn: Build
+  jobs:
+  - deployment: Deploy
+    pool:
+      vmImage: 'windows-latest'
+    environment: spike
+
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: current
+            artifact: drop
+
+
+          - task: AzureFunctionApp@1
+            displayName: 'Azure Function Deploy: AzureServiceBusTriggerFuncMVP'
+            inputs:
+              azureSubscription: 'mvpfuncdeploy'
+              appType: functionApp
+              appName: '$(FuncName)'
+              package: '$(Pipeline.Workspace)/drop/$(buildConfiguration)/FuncSvcBusTrigger.zip'
+              runtimeStack: DOCKER|microsoft/azure-functions-dotnet:4
+              startUpCommand: 'func azure functionapp publish $(FuncName) --no-bundler'
+          - task: AzureAppServiceSettings@1
+            displayName: 'Update web app settings'
+            inputs:
+              azureSubscription: 'mvpfuncdeploy'
+              appName: $(WebAppName)
+              resourceGroupName: $(ResourceGroupName)
+              appSettings: |
+                [
+                  {
+                    "name": "ServiceBusConnectionString",
+                    "value": "$(ServiceConfiguration:ServiceBusConnectionString)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:DataLakeConnectionString",
+                    "value": "$(ServiceConfiguration:DataLakeConnectionString)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:TopicName",
+                    "value": "$(ServiceConfiguration:TopicName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:SubscriptionName",
+                    "value": "$(ServiceConfiguration:SubscriptionName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:SubscriptionName",
+                    "value": "$(ServiceConfiguration:SubscriptionName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:DataLakeContainerName",
+                    "value": "$(ServiceConfiguration:DataLakeContainerName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:DataLakeFileName",
+                    "value": "$(ServiceConfiguration:DataLakeFileName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:DirectoryName",
+                    "value": "$(ServiceConfiguration:DirectoryName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:SubDirectoryName",
+                    "value": "$(ServiceConfiguration:SubDirectoryName)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:FhirEndpoint",
+                    "value": "$(ServiceConfiguration:FhirEndpoint)",
+                    "slotSetting": false
+                  },
+                  {
+                    "name": "ServiceConfiguration:JsonPath",
+                    "value": "$(ServiceConfiguration:JsonPath)",
+                    "slotSetting": false
+                  }
+                ]
